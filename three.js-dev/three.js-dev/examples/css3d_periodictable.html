@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Three.js CSS3D – Google Sheet 3D Table</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #001018, #000);
+      color: white;
+      font-family: Helvetica, sans-serif;
+    }
+
+    a { color: #8ff; }
+
+    #menu {
+      position: absolute;
+      bottom: 20px;
+      width: 100%;
+      text-align: center;
+      z-index: 2;
+    }
+
+    #info {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      z-index: 2;
+    }
+
+    .element {
+      width: 160px;
+      height: 200px;
+      background: rgba(0,127,127,0.6);
+      border: 1px solid rgba(127,255,255,0.25);
+      box-shadow: 0 0 12px rgba(0,255,255,0.5);
+      border-radius: 10px;
+      position: relative;
+      text-align: center;
+      cursor: default;
+      overflow: hidden;
+    }
+
+    .element:hover {
+      box-shadow: 0 0 15px rgba(0,255,255,0.9);
+      border: 1px solid rgba(127,255,255,0.75);
+    }
+
+    .element img {
+      width: 100%;
+      height: 100px;
+      object-fit: cover;
+    }
+
+    .element .name {
+      font-weight: bold;
+      margin-top: 4px;
+      font-size: 14px;
+    }
+
+    .element .details {
+      font-size: 12px;
+      line-height: 1.3em;
+      padding: 4px;
+    }
+
+    button {
+      color: rgba(127,255,255,0.9);
+      background: transparent;
+      border: 1px solid rgba(127,255,255,0.9);
+      border-radius: 6px;
+      padding: 6px 12px;
+      cursor: pointer;
+      margin: 3px;
+      transition: all 0.2s;
+    }
+
+    button:hover {
+      background-color: rgba(0,255,255,0.3);
+    }
+
+    button:active {
+      background-color: rgba(0,255,255,0.7);
+      color: black;
+    }
+
+    #googleSignIn {
+      position: absolute;
+      top: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="info">
+    <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> CSS3D + Google Sheet
+  </div>
+
+  <div id="container"></div>
+
+  <button id="googleSignIn">Sign in with Google</button>
+
+  <div id="menu">
+    <button id="table">TABLE</button>
+    <button id="sphere">SPHERE</button>
+    <button id="helix">HELIX</button>
+    <button id="grid">GRID</button>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "../build/three.module.js",
+        "three/addons/": "./jsm/"
+      }
+    }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import TWEEN from 'three/addons/libs/tween.module.js';
+    import { TrackballControls } from 'three/addons/controls/TrackballControls.js';
+    import { CSS3DRenderer, CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
+
+    const CLIENT_ID = "1073191661581-mft2hbckbm4dfoifn931lkadrmag1vno.apps.googleusercontent.com";
+    const API_KEY = "AIzaSyDwoFi-KacBtIDM5LR8IUwNvFj_ofUwpvc";
+    const SPREADSHEET_ID = "1uLWHeoyEEviTY9F5N0qKDEVAqO8m7cuI7kFM2YgVZbM"; 
+    const DISCOVERY_DOC = "https://sheets.googleapis.com/$discovery/rest?version=v4";
+    const SCOPES = "https://www.googleapis.com/auth/spreadsheets.readonly";
+
+    let gapiInited = false;
+    let gisInited = false;
+    let tokenClient;
+
+    async function initializeGapiClient() {
+      await gapi.client.init({
+        apiKey: API_KEY,
+        discoveryDocs: [DISCOVERY_DOC],
+      });
+      gapiInited = true;
+      console.log("✅ GAPI initialized");
+    }
+
+    function gapiLoaded() {
+      gapi.load('client', initializeGapiClient);
+    }
+
+    function gisLoaded() {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: handleAuth,
+      });
+      gisInited = true;
+      console.log("✅ GIS initialized");
+    }
+
+    async function handleAuth(response) {
+      gapi.client.setToken({ access_token: response.access_token });
+      const data = await fetchSheetData();
+      console.log("📊 Fetched data:", data);
+      initScene(data);
+      document.getElementById("googleSignIn").style.display = "none";
+    }
+
+    function handleAuthClick() {
+      if (!gisInited || !gapiInited) {
+        alert("Google API not ready yet — please wait a moment.");
+        return;
+      }
+      tokenClient.requestAccessToken();
+    }
+
+    async function fetchSheetData() {
+      const range = 'Sheet1!A1:F201';
+      const res = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: SPREADSHEET_ID,
+        range,
+      });
+      const rows = res.result.values;
+      if (!rows || rows.length === 0) {
+        alert("No data found in the sheet.");
+        return [];
+      }
+      const headers = rows.shift();
+      return rows.map(r => {
+        const obj = {};
+        headers.forEach((h, i) => obj[h] = r[i] || '');
+        return obj;
+      });
+    }
+
+    let camera, scene, renderer, controls;
+    const objects = [];
+    const targets = { table: [], sphere: [], helix: [], grid: [] };
+
+    function initScene(data) {
+      camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 10000);
+      camera.position.z = 3000;
+      scene = new THREE.Scene();
+
+      data.forEach((item, i) => {
+        const element = document.createElement('div');
+        element.className = 'element';
+        element.innerHTML = `
+          <img src="${item.Photo || ''}" alt="photo">
+          <div class="name">${item.Name || 'Unknown'}</div>
+          <div class="details">
+            <b>Age:</b> ${item.Age || ''}<br>
+            <b>Country:</b> ${item.Country || ''}<br>
+            <b>Interest:</b> ${item.Interest || ''}<br>
+            <b>Net Worth:</b> ${item["Net Worth"] || ''}
+          </div>
+        `;
+
+        const net = parseNetWorth(item["Net Worth"]);
+        if (net < 100000) element.style.background = 'rgba(255,0,0,0.6)';
+        else if (net > 250000) element.style.background = 'rgba(0,255,0,0.6)';
+        else element.style.background = 'rgba(255,165,0,0.6)';
+
+        const objectCSS = new CSS3DObject(element);
+        objectCSS.position.x = Math.random() * 4000 - 2000;
+        objectCSS.position.y = Math.random() * 4000 - 2000;
+        objectCSS.position.z = Math.random() * 4000 - 2000;
+        scene.add(objectCSS);
+        objects.push(objectCSS);
+
+        const obj = new THREE.Object3D();
+        obj.position.x = ((i % 20) * 180) - 1600;
+        obj.position.y = -(Math.floor(i / 20) * 220) + 1000;
+        targets.table.push(obj);
+      });
+
+      const vector = new THREE.Vector3();
+      for (let i = 0, l = objects.length; i < l; i++) {
+        const phi = Math.acos(-1 + (2 * i) / l);
+        const theta = Math.sqrt(l * Math.PI) * phi;
+        const object = new THREE.Object3D();
+        object.position.setFromSphericalCoords(900, phi, theta);
+        vector.copy(object.position).multiplyScalar(2);
+        object.lookAt(vector);
+        targets.sphere.push(object);
+      }
+
+      // Helix layout
+      for (let i = 0, l = objects.length; i < l; i++) {
+        const theta = i * 0.175 + Math.PI;
+        const y = -(i * 8) + 450;
+        const object = new THREE.Object3D();
+        object.position.setFromCylindricalCoords(900, theta, y);
+        vector.x = object.position.x * 2;
+        vector.y = object.position.y;
+        vector.z = object.position.z * 2;
+        object.lookAt(vector);
+        targets.helix.push(object);
+      }
+
+      // Grid layout
+      let i = 0;
+      for (let z = 0; z < 10; z++) {
+        for (let y = 0; y < 4; y++) {
+          for (let x = 0; x < 5; x++) {
+            if (i >= objects.length) break;
+            const obj = new THREE.Object3D();
+            obj.position.x = (x - 2) * 400;
+            obj.position.y = (2 - y) * 400;
+            obj.position.z = (z - 5) * 800;
+            targets.grid.push(obj);
+            i++;
+          }
+        }
+      }
+
+      renderer = new CSS3DRenderer();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById('container').appendChild(renderer.domElement);
+
+      controls = new TrackballControls(camera, renderer.domElement);
+      controls.minDistance = 500;
+      controls.maxDistance = 6000;
+      controls.addEventListener('change', render);
+
+      document.getElementById('table').onclick = () => transform(targets.table, 2000);
+      document.getElementById('sphere').onclick = () => transform(targets.sphere, 2000);
+      document.getElementById('helix').onclick = () => transform(targets.helix, 2000);
+      document.getElementById('grid').onclick = () => transform(targets.grid, 2000);
+
+      transform(targets.table, 2000);
+      window.addEventListener('resize', onWindowResize);
+      animate();
+    }
+
+    function parseNetWorth(str) {
+      if (!str) return 0;
+      str = str.replace(/[$,]/g, '').trim();
+      return parseFloat(str) || 0;
+    }
+
+    function transform(targets, duration) {
+      TWEEN.removeAll();
+      for (let i = 0; i < objects.length; i++) {
+        const object = objects[i];
+        const target = targets[i];
+        if (!target) continue;
+        new TWEEN.Tween(object.position)
+          .to({ x: target.position.x, y: target.position.y, z: target.position.z }, Math.random() * duration + duration)
+          .easing(TWEEN.Easing.Exponential.InOut)
+          .start();
+        new TWEEN.Tween(object.rotation)
+          .to({ x: target.rotation.x, y: target.rotation.y, z: target.rotation.z }, Math.random() * duration + duration)
+          .easing(TWEEN.Easing.Exponential.InOut)
+          .start();
+      }
+      new TWEEN.Tween(this).to({}, duration * 2).onUpdate(render).start();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+      TWEEN.update();
+      controls.update();
+    }
+
+    function render() {
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      render();
+    }
+
+    document.getElementById("googleSignIn").addEventListener("click", handleAuthClick);
+    window.addEventListener("load", () => {
+      gapiLoaded();
+      gisLoaded();
+    });
+  </script>
+</body>
+</html>
